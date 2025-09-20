@@ -20,7 +20,7 @@ extraction/spiders/mercadolivre.py
 ### 2. Actualiza la URL inicial
 
 Configúrala con el artículo que desees extraer.
-Si quieres obtener precios de notebooks Acer, la URL sería
+Si quieres obtener precios de notebooks Acer en el sitio argentino, la URL sería
 
 ```bash
 https://listado.mercadolibre.com.ar/notebook-acer
@@ -28,10 +28,10 @@ https://listado.mercadolibre.com.ar/notebook-acer
 
 ### 3. Actualiza la función parse
 
-Haz clic en el botón «Siguiente página» y observa la nueva URL. Debería verse así:
+Haz clic en el botón «Siguiente página» y observa la nueva URL. En la versión argentina debería verse así:
 
 ```bash
-https://listado.mercadolibre.com.ar/informatica/portateis-acessorios/notebooks/acer/notebook-acer_Desde_49_NoIndex_True
+https://listado.mercadolibre.com.ar/computacion/notebooks-accesorios/notebooks/acer/notebook-acer_Desde_49_NoIndex_True
 ```
 
 Define esta URL como el atributo _next page_ en la clase MercadoLivreSpider, pero cambia _49_ por {offset}.
@@ -41,8 +41,12 @@ Esto garantizará que el crawler avance por las siguientes páginas.
 Al final, el código del atributo _next page_ debería verse así:
 
 ```bash
-next_page = f"https://listado.mercadolibre.com.ar/instrumentos-musicais/instrumentos-corda/baixos/baixo-5-cordas_Desde_{offset}_NoIndex_True_STRINGS*NUMBER_5-5"
+next_page = f"https://listado.mercadolibre.com.ar/instrumentos-musicales/instrumentos-de-cuerda/bajos/bajo-5-cuerdas_Desde_{offset}_NoIndex_True"
 ```
+
+Ten presente que en Mercado Libre Argentina las URL utilizan español rioplatense, por lo que los segmentos de ruta pueden variar (por ejemplo, `instrumentos-musicales` en lugar de `instrumentos-musicais`). Ajusta los valores según el artículo que estés rastreando.
+
+> ℹ️ Nota: El sitio argentino muestra los precios en **pesos argentinos (ARS)** y la interfaz está en **español**. Verifica que tu pipeline de transformación y visualización maneje correctamente la moneda y, si es necesario, la traducción de campos.
 
 ### Dashboard
 
@@ -67,3 +71,5 @@ docker build -t mlscrape .
 ```bash
 docker run -p 8501:8501 mlscrape
 ```
+
+Esto asignará tu puerto 8501 al expuesto en el Dockerfile.
