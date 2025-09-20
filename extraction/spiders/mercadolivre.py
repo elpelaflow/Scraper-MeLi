@@ -8,7 +8,7 @@ save_path = os.path.join(os.getcwd(), 'data')
 class MercadoLivreSpider(scrapy.Spider):
     name = "mercadolivre"
     allowed_domains = ["listado.mercadolibre.com.ar"]
-    start_urls = ["https://listado.mercadolibre.com.ar/bajo-5-cuerdas"]
+    start_urls = ["https://listado.mercadolibre.com.ar/guitarra-electrica"]
 
     page_count = 1
     max_pages = 20
@@ -33,8 +33,7 @@ class MercadoLivreSpider(scrapy.Spider):
             # 48 is the amount of items shown in a given page
             offset = 48 * self.page_count
             next_page = (
-                "https://listado.mercadolibre.com.ar/instrumentos-musicales/"
-                "instrumentos-de-cuerda/bajos/bajo-5-cuerdas_Desde_"
+                "https://listado.mercadolibre.com.ar/guitarra-electrica"
                 f"{offset}_NoIndex_True"
             )
             if next_page:
