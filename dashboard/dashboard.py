@@ -62,15 +62,21 @@ def get_dashboard(df: pd.DataFrame) -> None:
                 if st.button("Refrescar"):
                     _cached_domain_discovery.clear()
 
-            raw = _cached_domain_discovery(q, dd_limit, site)
+            results, raw_body = _cached_domain_discovery(q, dd_limit, site)
 
             st.markdown("**Respuesta (JSON crudo):**")
-            st.json(raw, expanded=False)
+            if raw_body:
+                st.code(raw_body, language="json")
+            else:
+                st.info("No se obtuvo respuesta del servicio de Domain Discovery.")
+
+            if results:
+                st.markdown("**Vista estructurada:**")
+                st.json(results, expanded=False)
 
             # Vista rápida (si se puede)
-            if isinstance(raw, list) and len(raw) > 0:
-                import pandas as pd
-                df_dd = pd.DataFrame(raw)
+            if isinstance(results, list) and len(results) > 0:
+                df_dd = pd.DataFrame(results)
                 keep = [c for c in ["domain_id", "domain_name", "category_id", "category_name", "relevance"] if c in df_dd.columns]
                 if keep:
                     st.markdown("**Vista rápida (tabla):**")
@@ -85,8 +91,8 @@ def get_dashboard(df: pd.DataFrame) -> None:
 
             # (Opcional) Filtrar dataset principal por categoría sugerida si df existe en este scope:
             try:
-                if isinstance(raw, list) and len(raw) > 0 and "category_id" in df.columns:
-                    sugeridas = pd.DataFrame(raw)
+                if isinstance(results, list) and len(results) > 0 and "category_id" in df.columns:
+                    sugeridas = pd.DataFrame(results)
                     if "category_id" in sugeridas.columns:
                         opciones = (
                             (sugeridas["category_name"].fillna("") + " (" + sugeridas["category_id"] + ")")
@@ -97,7 +103,7 @@ def get_dashboard(df: pd.DataFrame) -> None:
                         if choice != "(ninguna)":
                             cat_elegida = choice.split("(")[-1].rstrip(")")
                             df = df[df["category_id"] == cat_elegida]
-                elif isinstance(raw, list) and len(raw) > 0 and "category_id" not in (df.columns if 'df' in locals() else []):
+                elif isinstance(results, list) and len(results) > 0 and "category_id" not in (df.columns if 'df' in locals() else []):
                     st.warning("Tu dataset no incluye 'category_id'. Extraelo en el spider y guardalo para poder filtrar por categoría.")
             except Exception:
                 pass

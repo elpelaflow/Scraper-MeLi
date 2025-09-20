@@ -35,11 +35,58 @@ def load_search_query(default: str = "") -> str:
         if data is None:
             continue
         if isinstance(data, str):
-            return data
+            value = data.strip()
+            if value:
+                return value
         if isinstance(data, dict):
             for key in _DEFAULT_QUERY_KEYS:
                 value = data.get(key)
                 if isinstance(value, str):
-                    return value
+                    value = value.strip()
+                    if value:
+                        return value
     return default
+
+
+def save_search_query(query: str, path: Path | None = None) -> None:
+    """Persist the last search query so the dashboard can reuse it."""
+
+    query = (query or "").strip()
+    if not query:
+        return
+
+    target = Path(path) if path is not None else _resolve_target_path()
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+
+    existing = _read_json(target)
+    payload: Dict[str, Any]
+
+    if isinstance(existing, dict):
+        payload = dict(existing)
+        payload["query"] = query
+    else:
+        payload = {"query": query}
+
+    try:
+        target.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        return
+
+
+def _resolve_target_path() -> Path:
+    for candidate in _CONFIG_CANDIDATES:
+        candidate = Path(candidate)
+        if candidate.exists():
+            return candidate
+    # Prefer a dedicated file for the query if nothing exists yet.
+    if len(_CONFIG_CANDIDATES) > 1:
+        return Path(_CONFIG_CANDIDATES[1])
+    return Path(_CONFIG_CANDIDATES[0])
     
