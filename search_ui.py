@@ -51,18 +51,29 @@ class ScraperUI(tk.Tk):
         entry.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(8, 0))
         entry.focus()
 
+        buttons_frame = ttk.Frame(self)
+        buttons_frame.pack(pady=8)
+
         self.generate_button = ttk.Button(
-            self,
+            buttons_frame,
             text="Generar búsquedas",
             command=self._on_generate_clicked,
         )
-        self.generate_button.pack(pady=8)
+        self.generate_button.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.dashboard_button = ttk.Button(
+            buttons_frame,
+            text="Ver dashboard",
+            command=self._on_dashboard_clicked,
+        )
+        self.dashboard_button.pack(side=tk.LEFT)
 
         status_label = ttk.Label(self, textvariable=self.status_var)
         status_label.pack(**padding)
 
         self.output_text = tk.Text(self, height=10, wrap=tk.WORD, state=tk.DISABLED)
         self.output_text.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+
 
     def _on_generate_clicked(self) -> None:
         search_query = self.query_var.get().strip()
@@ -111,6 +122,30 @@ class ScraperUI(tk.Tk):
     def _handle_failure(self, message: str) -> None:
         self.status_var.set(message)
         self.generate_button.config(state=tk.NORMAL)
+
+    def _on_dashboard_clicked(self) -> None:
+        self.status_var.set("Abriendo dashboard...")
+        self.dashboard_button.config(state=tk.DISABLED)
+
+        threading.Thread(target=self._run_dashboard, daemon=True).start()
+
+    def _run_dashboard(self) -> None:
+        command = ["streamlit", "run", "dashboard/dashboard.py"]
+
+        try:
+            subprocess.Popen(command, cwd=BASE_DIR)
+        except Exception as exc:  # pylint: disable=broad-except
+            self.after(0, self._handle_dashboard_failure, exc)
+        else:
+            self.after(0, self._handle_dashboard_success)
+
+    def _handle_dashboard_success(self) -> None:
+        self.status_var.set("Dashboard iniciado. Revise la consola para más detalles.")
+        self.dashboard_button.config(state=tk.NORMAL)
+
+    def _handle_dashboard_failure(self, exc: Exception) -> None:  # pylint: disable=broad-except
+        self.status_var.set(f"Error al abrir el dashboard: {exc}")
+        self.dashboard_button.config(state=tk.NORMAL)
 
     def _write_output(self, message: str) -> None:
         self.output_text.config(state=tk.NORMAL)
