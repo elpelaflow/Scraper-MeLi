@@ -1,7 +1,11 @@
 import sqlite3
+from pathlib import Path
+import sys
 
 import pandas as pd
 import streamlit as st
+
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from config_utils import load_search_query
 from services.domain_discovery import fetch_domain_discovery
@@ -115,4 +119,3 @@ def get_dashboard(df: pd.DataFrame):
 
     if df_to_show.empty:
         st.warning("No hay datos para los criterios seleccionados.")
-        
