@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pandas as pd
 import sqlite3
 
@@ -19,8 +21,8 @@ def read_data(path_to_data: str = ''):
   return df
 
 
-def add_columns(df: pd.DataFrame) -> pd.DataFrame:
-  df['_source'] = "https://listado.mercadolibre.com.ar/guitarra-electrica"
+def add_columns(df: pd.DataFrame, search_url: str) -> pd.DataFrame:
+  df['_source'] = search_url
   df['scrap_date'] = datetime.now()
 
   return df
@@ -58,12 +60,13 @@ def save_to_sqlite3(df: pd.DataFrame) -> pd.DataFrame:
     conn.close()
 
 
-def transform_data(path_to_data: str = ''):
+def transform_data(path_to_data: str = '', search_url: str | None = None):
   if path_to_data == '':
     path_to_data = ('../data/data.json')
 
   df = read_data(path_to_data)
-  df = add_columns(df)
+  resolved_url = search_url or "https://listado.mercadolibre.com.ar/guitarra-electrica"
+  df = add_columns(df, resolved_url)
   df = fill_nulls(df)
   df = standardize_strings(df)
   df = price_to_float(df)
@@ -72,3 +75,4 @@ def transform_data(path_to_data: str = ''):
 
 if __name__ == "__main__":
   transform_data('../data/data.json')
+  
