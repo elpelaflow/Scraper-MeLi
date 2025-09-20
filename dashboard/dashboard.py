@@ -8,7 +8,10 @@ import streamlit as st
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from config_utils import load_search_query
-from services.domain_discovery import fetch_domain_discovery
+from services.domain_discovery import (
+    fetch_category_attributes,
+    fetch_domain_discovery,
+)
 
 
 def get_df_from_db(db_path: str | Path) -> pd.DataFrame:
@@ -51,62 +54,183 @@ def get_dashboard(df: pd.DataFrame) -> None:
             st.caption(f"Búsqueda actual: **{q}**")
 
             dd_limit = st.slider("Límite del llamado", 1, 20, 5, key="dd_limit")
-            site = st.selectbox("Site", ["MLA"], index=0, help="Dejalo en MLA salvo que necesites otro")
+            site = st.selectbox(
+                "Site", ["MLA"], index=0, help="Dejalo en MLA salvo que necesites otro"
+            )
 
-            @st.cache_data(show_spinner=False, ttl=60*60)
+            @st.cache_data(show_spinner=False, ttl=60 * 60)
             def _cached_domain_discovery(query: str, limit: int, site_code: str):
                 return fetch_domain_discovery(query=query, limit=limit, site=site_code)
 
+            @st.cache_data(show_spinner=False, ttl=60 * 60)
+            def _cached_category_attrs(category_id: str, site_code: str):
+                return fetch_category_attributes(category_id=category_id, site=site_code)
+
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("Refrescar"):
+                if st.button("Refrescar Domain Discovery"):
                     _cached_domain_discovery.clear()
+            with col2:
+                if st.button("Limpiar caché de atributos"):
+                    _cached_category_attrs.clear()
 
             results, raw_body = _cached_domain_discovery(q, dd_limit, site)
 
-            st.markdown("**Respuesta (JSON crudo):**")
-            if raw_body:
-                st.code(raw_body, language="json")
-            else:
-                st.info("No se obtuvo respuesta del servicio de Domain Discovery.")
+            tab_overview, tab_attrs = st.tabs([
+                "Visión general",
+                "Atributos de categorías",
+            ])
 
-            if results:
-                st.markdown("**Vista estructurada:**")
-                st.json(results, expanded=False)
+            with tab_overview:
+                st.markdown("**Respuesta (JSON crudo):**")
+                if raw_body:
+                    st.code(raw_body, language="json")
+                else:
+                    st.info("No se obtuvo respuesta del servicio de Domain Discovery.")
 
-            # Vista rápida (si se puede)
-            if isinstance(results, list) and len(results) > 0:
-                df_dd = pd.DataFrame(results)
-                keep = [c for c in ["domain_id", "domain_name", "category_id", "category_name", "relevance"] if c in df_dd.columns]
-                if keep:
-                    st.markdown("**Vista rápida (tabla):**")
-                    st.dataframe(df_dd[keep], use_container_width=True, hide_index=True)
+                if results:
+                    st.markdown("**Vista estructurada:**")
+                    st.json(results, expanded=False)
 
-            # URL de ejemplo para copiar/pegar
-            import urllib.parse
-            url_example = "https://api.mercadolibre.com/sites/{}/domain_discovery/search?q={}&limit={}".format(
-                site, urllib.parse.quote_plus(q or ""), dd_limit
-            )
-            st.code(f"GET {url_example}", language="bash")
+                # Vista rápida (si se puede)
+                if isinstance(results, list) and len(results) > 0:
+                    df_dd = pd.DataFrame(results)
+                    keep = [
+                        c
+                        for c in [
+                            "domain_id",
+                            "domain_name",
+                            "category_id",
+                            "category_name",
+                            "relevance",
+                        ]
+                        if c in df_dd.columns
+                    ]
+                    if keep:
+                        st.markdown("**Vista rápida (tabla):**")
+                        st.dataframe(
+                            df_dd[keep], use_container_width=True, hide_index=True
+                        )
 
-            # (Opcional) Filtrar dataset principal por categoría sugerida si df existe en este scope:
-            try:
-                if isinstance(results, list) and len(results) > 0 and "category_id" in df.columns:
-                    sugeridas = pd.DataFrame(results)
-                    if "category_id" in sugeridas.columns:
-                        opciones = (
-                            (sugeridas["category_name"].fillna("") + " (" + sugeridas["category_id"] + ")")
-                            if "category_name" in sugeridas.columns
-                            else sugeridas["category_id"]
-                        ).dropna().drop_duplicates().tolist()
-                        choice = st.selectbox("Filtrar dataset por categoría sugerida", ["(ninguna)"] + opciones)
-                        if choice != "(ninguna)":
-                            cat_elegida = choice.split("(")[-1].rstrip(")")
-                            df = df[df["category_id"] == cat_elegida]
-                elif isinstance(results, list) and len(results) > 0 and "category_id" not in (df.columns if 'df' in locals() else []):
-                    st.warning("Tu dataset no incluye 'category_id'. Extraelo en el spider y guardalo para poder filtrar por categoría.")
-            except Exception:
-                pass
+                # URL de ejemplo para copiar/pegar
+                import urllib.parse
+
+                url_example = "https://api.mercadolibre.com/sites/{}/domain_discovery/search?q={}&limit={}".format(
+                    site, urllib.parse.quote_plus(q or ""), dd_limit
+                )
+                st.code(f"GET {url_example}", language="bash")
+
+                # (Opcional) Filtrar dataset principal por categoría sugerida si df existe en este scope:
+                try:
+                    if (
+                        isinstance(results, list)
+                        and len(results) > 0
+                        and "category_id" in df.columns
+                    ):
+                        sugeridas = pd.DataFrame(results)
+                        if "category_id" in sugeridas.columns:
+                            opciones = (
+                                (
+                                    sugeridas["category_name"].fillna("")
+                                    + " ("
+                                    + sugeridas["category_id"]
+                                    + ")"
+                                )
+                                if "category_name" in sugeridas.columns
+                                else sugeridas["category_id"]
+                            ).dropna().drop_duplicates().tolist()
+                            choice = st.selectbox(
+                                "Filtrar dataset por categoría sugerida",
+                                ["(ninguna)"] + opciones,
+                            )
+                            if choice != "(ninguna)":
+                                cat_elegida = choice.split("(")[-1].rstrip(")")
+                                df = df[df["category_id"] == cat_elegida]
+                    elif isinstance(results, list) and len(results) > 0 and "category_id" not in (
+                        df.columns if "df" in locals() else []
+                    ):
+                        st.warning(
+                            "Tu dataset no incluye 'category_id'. Extraelo en el spider y guardalo para poder filtrar por categoría."
+                        )
+                except Exception:
+                    pass
+
+            with tab_attrs:
+                if isinstance(results, list):
+                    category_mapping: dict[str, str] = {}
+                    for item in results:
+                        if not isinstance(item, dict):
+                            continue
+                        cat_id = item.get("category_id")
+                        if not cat_id:
+                            continue
+                        cat_id = str(cat_id)
+                        cat_name = item.get("category_name")
+                        if cat_name:
+                            category_mapping[cat_id] = str(cat_name)
+                        else:
+                            category_mapping.setdefault(cat_id, "")
+                    category_ids = sorted(cid for cid in category_mapping.keys() if cid)
+                else:
+                    category_ids = []
+                    category_mapping = {}
+
+                if not category_ids:
+                    st.info(
+                        "No se detectaron categorías en los resultados. Ejecutá Domain Discovery para habilitar esta sección."
+                    )
+                else:
+                    for cat_id in category_ids:
+                        cat_name = category_mapping.get(cat_id, "")
+                        display_name = cat_name or "Categoría sin nombre"
+                        with st.spinner(
+                            f"Consultando atributos para {display_name} ({cat_id})..."
+                        ):
+                            attrs, raw_attrs = _cached_category_attrs(cat_id, site)
+
+                        st.markdown(f"#### {display_name} ({cat_id})")
+
+                        if not raw_attrs:
+                            st.warning(
+                                "No se pudieron obtener los atributos de la categoría. Intentalo nuevamente más tarde."
+                            )
+                            st.divider()
+                            continue
+
+                        st.markdown("**Respuesta (JSON crudo):**")
+                        st.code(raw_attrs, language="json")
+
+                        if attrs:
+                            st.markdown("**Vista estructurada:**")
+                            st.json(attrs, expanded=False)
+                            try:
+                                df_attrs = pd.json_normalize(attrs)
+                            except Exception:
+                                df_attrs = pd.DataFrame()
+                            if not df_attrs.empty:
+                                keep_columns = [
+                                    col
+                                    for col in [
+                                        "id",
+                                        "name",
+                                        "value_type",
+                                        "tags.required",
+                                        "tags.restricted_values",
+                                        "tags.inference_priority",
+                                    ]
+                                    if col in df_attrs.columns
+                                ]
+                                if keep_columns:
+                                    st.markdown("**Vista rápida (tabla):**")
+                                    st.dataframe(
+                                        df_attrs[keep_columns],
+                                        use_container_width=True,
+                                        hide_index=True,
+                                    )
+                        else:
+                            st.info("La categoría no devolvió atributos para mostrar.")
+
+                        st.divider()
 
     scrap_dates = df.get("scrap_date")
     if scrap_dates is not None:
@@ -131,8 +255,7 @@ def get_dashboard(df: pd.DataFrame) -> None:
 
     if df_to_show.empty:
         st.warning("No hay datos para los criterios seleccionados.")
-    else:
-        st.dataframe(df_to_show, use_container_width=True)
+    else:        st.dataframe(df_to_show, use_container_width=True)
 
 
 def main() -> None:
