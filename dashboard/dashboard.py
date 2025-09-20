@@ -1,3 +1,6 @@
++4
+-4
+
 import pandas as pd
 import sqlite3
 import streamlit as st
@@ -19,7 +22,7 @@ def get_df_from_db(db_path: str) -> pd.DataFrame:
 
 
 def get_dashboard(df: pd.DataFrame):
-    st.title("Scraping Results from Mercado Livre")
+    st.title("Resultados del scraping de Mercado Libre Argentina")
     st.subheader("By Heitor Nolla")
 
     col1, col2 = st.columns(2)
@@ -28,12 +31,12 @@ def get_dashboard(df: pd.DataFrame):
     col1.metric(label="Total Items Found", value=total_itens)
 
     avg_price = df['price'].mean()
-    col2.metric(label="Average BRL Price", value=f"{avg_price:.2f}")
+    col2.metric(label="Precio promedio (ARS)", value=f"{avg_price:.2f}")
 
-    st.markdown("### All Items")
+    st.markdown("### Todos los artículos")
 
     # Search input
-    search_term = st.text_input("Search for a bass (or any keyword):")
+    search_term = st.text_input("Buscar productos (por palabra clave):")
 
     # Filter dataframe based on search input
     if search_term:
@@ -48,3 +51,4 @@ def get_dashboard(df: pd.DataFrame):
 if __name__ == "__main__":
   df = get_df_from_db('data/database.db')
   get_dashboard(df)
+  

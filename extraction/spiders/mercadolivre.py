@@ -7,8 +7,8 @@ save_path = os.path.join(os.getcwd(), 'data')
 
 class MercadoLivreSpider(scrapy.Spider):
     name = "mercadolivre"
-    allowed_domains = ["lista.mercadolivre.com.br"]
-    start_urls = ["https://lista.mercadolivre.com.br/baixo-5-cordas"]
+    allowed_domains = ["listado.mercadolibre.com.ar"]
+    start_urls = ["https://listado.mercadolibre.com.ar/guitarra-electrica"]
 
     page_count = 1
     max_pages = 20
@@ -32,7 +32,10 @@ class MercadoLivreSpider(scrapy.Spider):
         if self.page_count < self.max_pages:
             # 48 is the amount of items shown in a given page
             offset = 48 * self.page_count
-            next_page = f"https://lista.mercadolivre.com.br/instrumentos-musicais/instrumentos-corda/baixos/baixo-5-cordas_Desde_{offset}_NoIndex_True_STRINGS*NUMBER_5-5"
+            next_page = (
+                "https://listado.mercadolibre.com.ar/guitarra-electrica"
+                f"{offset}_NoIndex_True"
+            )
             if next_page:
                 self.page_count += 1
                 yield scrapy.Request(url=next_page, callback=self.parse)

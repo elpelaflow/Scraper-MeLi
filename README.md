@@ -1,64 +1,68 @@
 # Web Scraping Mercado Livre
 
-**Disclaimer:**
-_This is a personal project used for educational/didatic purposes only_
+**Aviso legal:**
+_Este es un proyecto personal utilizado únicamente con fines educativos/didácticos_
 
-## Overview
+## Descripción general
 
-This project leverages Python's **Scrapy** library to perform web scraping on Mercado Livre, specifically collecting information about **5-string bass guitars**
+Este proyecto utiliza la biblioteca **Scrapy** de Python para realizar web scraping en Mercado Livre, recopilando específicamente información sobre **bajos de 5 cuerdas**.
 
-## Adapting for other items
+## Adaptación para otros artículos
 
-If you'd like to scrape data for a different item, it is totally possible!
+¡Si deseas extraer datos para otro artículo, es totalmente posible!
 
-### 1. Go to the file located in
+### 1. Ve al archivo ubicado en
 
 ```bash
 extraction/spiders/mercadolivre.py
 ```
 
-### 2. Update the start url
+### 2. Actualiza la URL inicial
 
-Set it to the item you wish to scrape
-If you wish to scrape prices for Acer notebooks, the url would be
-
-```bash
-https://lista.mercadolivre.com.br/notebook-acer
-```
-
-### 3. Update the parse function
-
-Click the "Next Page" button and observe the new URL. It should look like
+Configúrala con el artículo que desees extraer.
+Si quieres obtener precios de notebooks Acer en el sitio argentino, la URL sería
 
 ```bash
-https://lista.mercadolivre.com.br/informatica/portateis-acessorios/notebooks/acer/notebook-acer_Desde_49_NoIndex_True
+https://listado.mercadolibre.com.ar/notebook-acer
 ```
 
-Set this url as the _next page_ attribute in the MercadoLivreSpider class, but change _49_ to {offset}
+### 3. Actualiza la función parse
 
-This will ensure that the crawler moves through to the next pages
-
-In the end, the code for the _next page_ attribute should look like
+Haz clic en el botón «Siguiente página» y observa la nueva URL. En la versión argentina debería verse así:
 
 ```bash
-next_page = f"https://lista.mercadolivre.com.br/instrumentos-musicais/instrumentos-corda/baixos/baixo-5-cordas_Desde_{offset}_NoIndex_True_STRINGS*NUMBER_5-5"
+https://listado.mercadolibre.com.ar/computacion/notebooks-accesorios/notebooks/acer/notebook-acer_Desde_49_NoIndex_True
 ```
+
+Define esta URL como el atributo _next page_ en la clase MercadoLivreSpider, pero cambia _49_ por {offset}.
+
+Esto garantizará que el crawler avance por las siguientes páginas.
+
+Al final, el código del atributo _next page_ debería verse así:
+
+```bash
+next_page = f"https://listado.mercadolibre.com.ar/instrumentos-musicales/instrumentos-de-cuerda/bajos/bajo-5-cuerdas_Desde_{offset}_NoIndex_True"
+```
+
+Ten presente que en Mercado Libre Argentina las URL utilizan español rioplatense, por lo que los segmentos de ruta pueden variar (por ejemplo, `instrumentos-musicales` en lugar de `instrumentos-musicais`). Ajusta los valores según el artículo que estés rastreando.
+
+> ℹ️ Nota: El sitio argentino muestra los precios en **pesos argentinos (ARS)** y la interfaz está en **español**. Verifica que tu pipeline de transformación y visualización maneje correctamente la moneda y, si es necesario, la traducción de campos.
 
 ### Dashboard
 
-The dashboard currently looks like this:
+Actualmente, el dashboard se ve así:
 
 !['Screenshot of the dashboard'](assets/screenshot.png)
 
-You may search through all items and apply filters
+Puedes buscar todos los artículos y aplicar filtros.
 
-## How to Install and Run the project
+## Cómo instalar y ejecutar el proyecto
 
-### With Docker
+### Con Docker
 
-I have refactored the project to offer Docker support
+He refactorizado el proyecto para ofrecer compatibilidad con Docker.
 
-You may install it with the following commands:
+Puedes instalarlo con los siguientes comandos:
 
 ```bash
 docker build -t mlscrape .
@@ -68,64 +72,4 @@ docker build -t mlscrape .
 docker run -p 8501:8501 mlscrape
 ```
 
-This will map your 8501 port to the one exposed on the Dockerfile
-
-You will be able to access the dashboard by navigating to localhost:8501
-
-### With a local Python installation
-
-It is my personal recommendation that you make a new virtual Python environment for every project you run. To do so, open your preferred terminal and run the commands:
-
-#### 1. Clone the repository
-
-```bash
-git clone https://github.com/heitornolla/mercadolivre-scraping.git
-```
-
-#### 2. Move to the project folder
-
-```bash
-cd mercadolivre-scraping
-```
-
-#### 3. Define the local Python version
-
-```bash
-pyenv local 3.12.1
-```
-
-#### 4. Create a new Python environment
-
-You can do this with Venv with the command
-
-```bash
-python -m venv .venv
-```
-
-or use other environment managers, such as Conda
-
-If you opted for Venv, activate the environment with
-
-```bash
-source .venv/Scripts/activate
-```
-
-#### 5. Install the Requirements
-
-```bash
-pip install -r requirements.txt
-```
-
-#### 6. Run the Project!
-
-Run the crawl.py file to crawl Mercado Livre
-
-To generate the dashboard based on your data, run
-
-```bash
-streamlit run dashboard/dashboard.py
-```
-
-## Technologies Used
-
-Python, Scrapy, Pandas, Streamlit and Docker
+Esto asignará tu puerto 8501 al expuesto en el Dockerfile.

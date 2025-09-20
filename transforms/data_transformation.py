@@ -19,8 +19,8 @@ def read_data(path_to_data: str = ''):
   return df
 
 
-def add_columns(df: pd.DataFrame) -> pd.DataFrame: 
-  df['_source'] = "https://lista.mercadolivre.com.br/baixo-5-cordas"
+def add_columns(df: pd.DataFrame) -> pd.DataFrame:
+  df['_source'] = "https://listado.mercadolibre.com.ar/guitarra-electrica"
   df['scrap_date'] = datetime.now()
 
   return df
