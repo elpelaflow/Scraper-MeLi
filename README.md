@@ -1,6 +1,3 @@
-+38
--38
-
 # Web Scraping Mercado Livre
 
 **Aviso legal:**
@@ -26,7 +23,7 @@ Configúrala con el artículo que desees extraer.
 Si quieres obtener precios de notebooks Acer, la URL sería
 
 ```bash
-https://lista.mercadolivre.com.br/notebook-acer
+https://listado.mercadolibre.com.ar/notebook-acer
 ```
 
 ### 3. Actualiza la función parse
@@ -34,7 +31,7 @@ https://lista.mercadolivre.com.br/notebook-acer
 Haz clic en el botón «Siguiente página» y observa la nueva URL. Debería verse así:
 
 ```bash
-https://lista.mercadolivre.com.br/informatica/portateis-acessorios/notebooks/acer/notebook-acer_Desde_49_NoIndex_True
+https://listado.mercadolibre.com.ar/informatica/portateis-acessorios/notebooks/acer/notebook-acer_Desde_49_NoIndex_True
 ```
 
 Define esta URL como el atributo _next page_ en la clase MercadoLivreSpider, pero cambia _49_ por {offset}.
@@ -44,7 +41,7 @@ Esto garantizará que el crawler avance por las siguientes páginas.
 Al final, el código del atributo _next page_ debería verse así:
 
 ```bash
-next_page = f"https://lista.mercadolivre.com.br/instrumentos-musicais/instrumentos-corda/baixos/baixo-5-cordas_Desde_{offset}_NoIndex_True_STRINGS*NUMBER_5-5"
+next_page = f"https://listado.mercadolibre.com.ar/instrumentos-musicais/instrumentos-corda/baixos/baixo-5-cordas_Desde_{offset}_NoIndex_True_STRINGS*NUMBER_5-5"
 ```
 
 ### Dashboard
@@ -70,65 +67,3 @@ docker build -t mlscrape .
 ```bash
 docker run -p 8501:8501 mlscrape
 ```
-
-Esto asignará tu puerto 8501 al expuesto en el Dockerfile.
-
-Podrás acceder al dashboard navegando a localhost:8501.
-
-### Con una instalación local de Python
-
-Recomiendo crear un entorno virtual de Python nuevo para cada proyecto que ejecutes. Para hacerlo, abre tu terminal preferida y ejecuta los comandos:
-
-#### 1. Clona el repositorio
-
-```bash
-git clone https://github.com/heitornolla/mercadolivre-scraping.git
-```
-
-#### 2. Muévete a la carpeta del proyecto
-
-```bash
-cd mercadolivre-scraping
-```
-
-#### 3. Define la versión local de Python
-
-```bash
-pyenv local 3.12.1
-```
-
-#### 4. Crea un nuevo entorno de Python
-
-Puedes hacerlo con venv mediante el comando
-
-```bash
-python -m venv .venv
-```
-
-o usar otros gestores de entornos, como Conda.
-
-Si optaste por venv, activa el entorno con
-
-```bash
-source .venv/Scripts/activate
-```
-
-#### 5. Instala los requisitos
-
-```bash
-pip install -r requirements.txt
-```
-
-#### 6. ¡Ejecuta el proyecto!
-
-Ejecuta el archivo crawl.py para rastrear Mercado Livre.
-
-Para generar el dashboard con tus datos, ejecuta
-
-```bash
-streamlit run dashboard/dashboard.py
-```
-
-## Tecnologías utilizadas
-
-Python, Scrapy, Pandas, Streamlit y Docker
