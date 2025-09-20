@@ -11,26 +11,34 @@ from config_utils import load_search_query
 from services.domain_discovery import fetch_domain_discovery
 
 
-def get_df_from_db(db_path: str) -> pd.DataFrame:
-  try:
-    conn = sqlite3.connect(db_path)
+def get_df_from_db(db_path: str | Path) -> pd.DataFrame:
+    """Load items from the SQLite database.
 
-    df = pd.read_sql_query("SELECT * FROM mercadolivre_items", conn)
+    Returns an empty dataframe if the database is not available or the
+    query fails so the Streamlit app can continue rendering.
+    """
 
-  except:
-    print("Error loading data")
+    db_path = Path(db_path)
 
-  finally:
-    conn.close()
+    if not db_path.exists():
+        return pd.DataFrame()
 
-  return df
+    try:
+        with sqlite3.connect(db_path) as conn:
+            return pd.read_sql_query("SELECT * FROM mercadolivre_items", conn)
+    except Exception as exc:  # pylint: disable=broad-except
+        # Streamlit logs printed exceptions to the terminal, which is
+        # enough feedback here. Returning an empty dataframe keeps the UI
+        # responsive instead of failing with a blank page.
+        print(f"Error loading data from {db_path}: {exc}")
+        return pd.DataFrame()
 
 
-def get_dashboard(df: pd.DataFrame):
+def get_dashboard(df: pd.DataFrame) -> None:
     st.sidebar.title("Pestaña de navegación")
     st.sidebar.markdown("Selecciona la fecha de scraping que deseas explorar.")
 
-    with st.sidebar.expander("🧰 Filtros", expanded=True):
+    with st.sidebar.expander("🧰 Herramientas", expanded=True):
         # Si ya tenés tabs para Básicos/Avanzados, mantenelos y solo agrega la de Domain Discovery.
         try:
             tab_basicos, tab_avanzados, tab_dd = st.tabs(["Básicos", "Avanzados", "Domain Discovery"])
@@ -96,9 +104,7 @@ def get_dashboard(df: pd.DataFrame):
 
     scrap_dates = df.get("scrap_date")
     if scrap_dates is not None:
-        available_dates = (
-            scrap_dates.dropna().astype(str).unique().tolist()
-        )
+        available_dates = scrap_dates.dropna().astype(str).unique().tolist()
     else:
         available_dates = []
 
@@ -119,3 +125,21 @@ def get_dashboard(df: pd.DataFrame):
 
     if df_to_show.empty:
         st.warning("No hay datos para los criterios seleccionados.")
+    else:
+        st.dataframe(df_to_show, use_container_width=True)
+
+
+def main() -> None:
+    st.set_page_config(page_title="Scraper Mercado Libre", layout="wide")
+
+    data_dir = Path(__file__).resolve().parent.parent / "data" / "database.db"
+    df = get_df_from_db(data_dir)
+
+    if df.empty:
+        st.sidebar.warning("No se encontró información en la base de datos.")
+
+    get_dashboard(df)
+
+
+if __name__ == "__main__":
+    main()
