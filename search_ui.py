@@ -9,6 +9,8 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
 
+from config_utils import load_search_query, save_search_query
+
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -21,7 +23,7 @@ class ScraperUI(tk.Tk):
         self.geometry("500x320")
         self.resizable(False, False)
 
-        self.query_var = tk.StringVar()
+        self.query_var = tk.StringVar(value=load_search_query())
         self.status_var = tk.StringVar(value="Ingrese un término de búsqueda.")
 
         self._build_widgets()
@@ -82,6 +84,8 @@ class ScraperUI(tk.Tk):
             self.status_var.set("Por favor, ingrese un término de búsqueda.")
             return
 
+        save_search_query(search_query)
+        
         self.status_var.set("Ejecutando scraping...")
         self.generate_button.config(state=tk.DISABLED)
         self._write_output("")
@@ -158,4 +162,3 @@ class ScraperUI(tk.Tk):
 if __name__ == "__main__":
     app = ScraperUI()
     app.mainloop()
-    
