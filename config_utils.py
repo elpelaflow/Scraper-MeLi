@@ -16,6 +16,8 @@ _CONFIG_CANDIDATES = (
     Path("search_query.json"),
 )
 
+MAX_PAGES_DEFAULT = 5
+
 
 def _read_json(path: Path) -> Dict[str, Any] | str | None:
     try:
@@ -136,4 +138,43 @@ def load_int_flag(env_key: str, default: int | None = None) -> int | None:
     """
 
     return _coerce_int(os.getenv(env_key), default)
-      
+
+
+def _sanitize_positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            return None
+    try:
+        candidate = int(value)
+    except (TypeError, ValueError):
+        return None
+    if candidate <= 0:
+        return None
+    return candidate
+
+
+def sanitize_max_pages(value: Any) -> int | None:
+    """Return ``value`` coerced to a positive integer or ``None``."""
+
+    return _sanitize_positive_int(value)
+
+
+def resolve_max_pages(
+    *, cli_value: Any = None, ui_value: Any = None, env_key: str = "SCRAPER_MAX_PAGES"
+) -> int:
+    """Return the number of pages to crawl based on precedence rules."""
+
+    for candidate in (cli_value, ui_value, load_int_flag(env_key, None)):
+        normalized = sanitize_max_pages(candidate)
+        if normalized is not None:
+            return normalized
+    return MAX_PAGES_DEFAULT    

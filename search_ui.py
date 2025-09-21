@@ -9,7 +9,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
 
-from config_utils import load_search_query, save_search_query
+from config_utils import MAX_PAGES_DEFAULT, load_search_query, resolve_max_pages, save_search_query
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -25,6 +25,8 @@ class ScraperUI(tk.Tk):
 
         self.query_var = tk.StringVar(value=load_search_query())
         self.status_var = tk.StringVar(value="Ingrese un término de búsqueda.")
+        self.max_pages_var = tk.IntVar(value=MAX_PAGES_DEFAULT)
+        self.plan_var = tk.StringVar()
 
         self._build_widgets()
 
@@ -52,6 +54,28 @@ class ScraperUI(tk.Tk):
         entry = ttk.Entry(entry_frame, textvariable=self.query_var)
         entry.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(8, 0))
         entry.focus()
+
+        max_pages_frame = ttk.Frame(self)
+        max_pages_frame.pack(fill=tk.X, padx=12, pady=(0, 8))
+
+        max_pages_label = ttk.Label(max_pages_frame, text="Máx. páginas a recorrer:")
+        max_pages_label.pack(side=tk.LEFT)
+
+        spinbox = ttk.Spinbox(
+            max_pages_frame,
+            from_=1,
+            to=50,
+            textvariable=self.max_pages_var,
+            width=5,
+            command=self._update_plan_label,
+        )
+        spinbox.pack(side=tk.LEFT, padx=(8, 0))
+
+        self.max_pages_var.trace_add("write", self._update_plan_label)
+        self._update_plan_label()
+
+        plan_label = ttk.Label(self, textvariable=self.plan_var)
+        plan_label.pack(padx=12, pady=(0, 6))
 
         buttons_frame = ttk.Frame(self)
         buttons_frame.pack(pady=8)
@@ -97,7 +121,15 @@ class ScraperUI(tk.Tk):
         ).start()
 
     def _run_crawler(self, search_query: str) -> None:
-        command = [sys.executable, "crawl.py", "--query", search_query]
+        max_pages = self._get_planned_max_pages()
+        command = [
+            sys.executable,
+            "crawl.py",
+            "--query",
+            search_query,
+            "--max-pages",
+            str(max_pages),
+        ]
 
         try:
             process = subprocess.run(
@@ -157,6 +189,30 @@ class ScraperUI(tk.Tk):
         if message:
             self.output_text.insert(tk.END, message)
         self.output_text.config(state=tk.DISABLED)
+
+    def _update_plan_label(self, *_: object) -> None:
+        try:
+            current = self.max_pages_var.get()
+        except tk.TclError:
+            current = MAX_PAGES_DEFAULT
+        planned = resolve_max_pages(ui_value=current)
+        if current != planned:
+            self.max_pages_var.set(planned)
+            return
+        suffix = "página" if planned == 1 else "páginas"
+        self.plan_var.set(f"Planeado: {planned} {suffix}")
+
+    def _get_planned_max_pages(self) -> int:
+        try:
+            current = self.max_pages_var.get()
+        except tk.TclError:
+            current = MAX_PAGES_DEFAULT
+        planned = resolve_max_pages(ui_value=current)
+        if planned != current:
+            self.max_pages_var.set(planned)
+        suffix = "página" if planned == 1 else "páginas"
+        self.plan_var.set(f"Planeado: {planned} {suffix}")
+        return planned
 
 
 if __name__ == "__main__":

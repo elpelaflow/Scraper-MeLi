@@ -12,7 +12,7 @@ from scrapy.crawler import CrawlerProcess
 from scrapy.http import Response
 from scrapy.utils.project import get_project_settings
 
-from config_utils import load_bool_flag, load_int_flag
+from config_utils import load_bool_flag, load_int_flag, resolve_max_pages
 from extraction.items import ListingItem, ProductDetailItem
 
 save_path = os.path.join(os.getcwd(), "data")
@@ -34,9 +34,6 @@ class MercadoLivreSpider(scrapy.Spider):
     ]
 
     default_query: ClassVar[str] = "guitarra-electrica"
-    page_count = 1
-    max_pages = 20
-
     def __init__(self, search_query: str | None = None, *args, **kwargs):
         self.enable_product_details = load_bool_flag("ENABLE_PRODUCT_DETAILS", True)
         details_limit = load_int_flag("DETAILS_MAX_PER_RUN", None)
@@ -58,6 +55,11 @@ class MercadoLivreSpider(scrapy.Spider):
             except (TypeError, ValueError):
                 details_limit = details_limit
 
+        try:
+            requested_max_pages = kwargs.pop("max_pages")
+        except KeyError:
+            requested_max_pages = None
+
         super().__init__(*args, **kwargs)
 
         self.detail_limit = details_limit if details_limit and details_limit > 0 else None
@@ -67,7 +69,17 @@ class MercadoLivreSpider(scrapy.Spider):
         self.search_query = _sanitize_query(search_query or self.default_query)
         self.base_search_url = f"https://listado.mercadolibre.com.ar/{self.search_query}"
         self.start_urls = [self.base_search_url]
-        self.page_count = 1
+        self.max_pages_requested = resolve_max_pages(cli_value=requested_max_pages)
+        self.max_pages = self.max_pages_requested
+        self.pages_fetched = 0
+
+    def start_requests(self):  # type: ignore[override]
+        self.logger.info(
+            "Iniciando scraping para '%s' (max_pages_requested=%s)",
+            self.search_query,
+            self.max_pages_requested,
+        )
+        yield from super().start_requests()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -121,6 +133,8 @@ class MercadoLivreSpider(scrapy.Spider):
     # ------------------------------------------------------------------
     def parse(self, response: Response):
         products = response.css("div.ui-search-result__wrapper")
+        product_count = len(products)
+        self.pages_fetched += 1
 
         for product in products:
             prices = product.css("span.andes-money-amount__fraction::text").getall()
@@ -150,12 +164,37 @@ class MercadoLivreSpider(scrapy.Spider):
                     headers=headers,
                 )
 
-        if self.page_count < self.max_pages:
-            offset = 48 * self.page_count
-            next_page = self.base_search_url + f"{offset}_NoIndex_True"
-            if next_page:
-                self.page_count += 1
-                yield scrapy.Request(url=next_page, callback=self.parse)
+        if product_count == 0:
+            self.logger.info(
+                "Página %s sin resultados. Deteniendo paginación.",
+                self.pages_fetched,
+            )
+            return
+
+        if self.pages_fetched >= self.max_pages_requested:
+            self.logger.info(
+                "Se alcanzó el máximo de páginas solicitadas (%s).",
+                self.max_pages_requested,
+            )
+            return
+
+        if product_count < 48:
+            self.logger.info(
+                "Página %s con %s resultados (<48). Deteniendo paginación.",
+                self.pages_fetched,
+                product_count,
+            )
+            return
+
+        offset = 48 * self.pages_fetched
+        next_page = self.base_search_url + f"{offset}_NoIndex_True"
+        self.logger.debug(
+            "Solicitando página %s (offset=%s, max_pages=%s)",
+            self.pages_fetched + 1,
+            offset,
+            self.max_pages_requested,
+        )
+        yield scrapy.Request(url=next_page, callback=self.parse)
 
     def _should_visit_detail(self, item_id: str | None, product_url: str | None) -> bool:
         if not self.enable_product_details:
@@ -475,5 +514,14 @@ class MercadoLivreSpider(scrapy.Spider):
                 },
             }
         )
+        spider_kwargs["max_pages"] = resolve_max_pages(cli_value=spider_kwargs.get("max_pages"))
         process.crawl(MercadoLivreSpider, search_query=search_query, **spider_kwargs)
         process.start()
+
+    def closed(self, reason: str) -> None:  # type: ignore[override]
+        self.logger.info(
+            "Scraping finalizado (reason=%s): max_pages_requested=%s, pages_fetched=%s",
+            reason,
+            self.max_pages_requested,
+            self.pages_fetched,
+        )
