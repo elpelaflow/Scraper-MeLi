@@ -522,7 +522,10 @@ def load_all_tables(db_path: str | Path) -> Dict[str, pd.DataFrame]:
     return tables
 
 
-def get_dashboard(df: pd.DataFrame, tables: Dict[str, pd.DataFrame]) -> None:
+def get_dashboard(
+    df: pd.DataFrame, tables: Dict[str, pd.DataFrame] | None = None
+) -> None:
+    tables = tables or {}
     st.sidebar.title("Pestaña de navegación")
     st.sidebar.markdown("Selecciona la fecha de scraping que deseas explorar.")
 
@@ -744,7 +747,32 @@ def get_dashboard(df: pd.DataFrame, tables: Dict[str, pd.DataFrame]) -> None:
 
     if df_to_show.empty:
         st.warning("No hay datos para los criterios seleccionados.")
-    else:        st.dataframe(df_to_show, use_container_width=True)
+    else:
+        st.dataframe(df_to_show, use_container_width=True)
+
+    st.divider()
+
+    if tables:
+        st.header("Tablas disponibles en la base de datos")
+        table_names = sorted(tables.keys())
+        selected_table = st.selectbox(
+            "Seleccioná la tabla que querés explorar",
+            options=table_names,
+            index=0,
+            key="table_selector",
+        )
+
+        selected_df = tables.get(selected_table, pd.DataFrame())
+        if selected_df.empty:
+            st.info(
+                "La tabla seleccionada no tiene registros para mostrar en este momento."
+            )
+        else:
+            st.dataframe(selected_df, use_container_width=True)
+    else:
+        st.info(
+            "No se detectaron tablas adicionales en la base de datos o no fue posible cargarlas."
+        )
 
 
 def main() -> None:
@@ -752,11 +780,12 @@ def main() -> None:
 
     data_dir = Path(__file__).resolve().parent.parent / "data" / "database.db"
     df = get_df_from_db(data_dir)
+    tables = load_all_tables(data_dir)
 
     if df.empty:
         st.sidebar.warning("No se encontró información en la base de datos.")
 
-    get_dashboard(df)
+    get_dashboard(df, tables)
 
 
 if __name__ == "__main__":
