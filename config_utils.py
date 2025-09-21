@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict
 
@@ -89,4 +91,49 @@ def _resolve_target_path() -> Path:
     if len(_CONFIG_CANDIDATES) > 1:
         return Path(_CONFIG_CANDIDATES[1])
     return Path(_CONFIG_CANDIDATES[0])
-    
+
+
+def _coerce_bool(value: str | None, default: bool) -> bool:
+    if value is None:
+        return default
+    value = value.strip().lower()
+    if value in {"1", "true", "yes", "on", "y", "si", "sí"}:
+        return True
+    if value in {"0", "false", "no", "off", "n"}:
+        return False
+    return default
+
+
+def _coerce_int(value: str | None, default: int | None) -> int | None:
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+@lru_cache(maxsize=None)
+def load_bool_flag(env_key: str, default: bool = False) -> bool:
+    """Load a boolean feature flag from environment variables.
+
+    The value is cached to avoid reading from the environment on each
+    invocation. Strings such as "true", "1", "yes" (case-insensitive)
+    are interpreted as enabled while "false", "0" and "no" disable the
+    flag. Any other value falls back to ``default``.
+    """
+
+    return _coerce_bool(os.getenv(env_key), default)
+
+
+@lru_cache(maxsize=None)
+def load_int_flag(env_key: str, default: int | None = None) -> int | None:
+    """Load an integer flag from the environment with optional default.
+
+    Empty strings or invalid values are ignored and ``default`` is
+    returned instead. The result is cached for the lifetime of the
+    process.
+    """
+
+    return _coerce_int(os.getenv(env_key), default)
+      
