@@ -219,8 +219,8 @@ def _build_histogram(series: pd.Series, bins: int = 10) -> pd.DataFrame:
     hist = (
         buckets.value_counts()
         .sort_index()
-        .reset_index()
-        .rename(columns={"index": "bin", "count": "count"})
+        .rename_axis("bin")
+        .reset_index(name="count")
     )
     hist["bin"] = hist["bin"].astype(str)
     return hist
