@@ -479,7 +479,7 @@ def _render_detail_preview(detail_row: Dict[str, Any], listing_row: Dict[str, An
 
 
 def _render_info_product_tab(tab_container, df: pd.DataFrame) -> None:
-    db_path = DATABASE_PAT
+    db_path = DATABASE_PATH
 
     with tab_container:
         st.markdown("### Info product")
