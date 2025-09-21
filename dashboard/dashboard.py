@@ -1,4 +1,5 @@
 import json
+import math
 import sqlite3
 import unicodedata
 from datetime import datetime
@@ -7,9 +8,13 @@ import sys
 from typing import Any, Dict, List
 
 import pandas as pd
+import numpy as np
+import altair as alt
 import streamlit as st
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
+
+DATABASE_PATH = Path(__file__).resolve().parent.parent / "data" / "database.db"
 
 from config_utils import load_bool_flag, load_search_query
 from services.domain_discovery import (
@@ -65,6 +70,162 @@ def _parse_json_list(value: Any) -> List[str]:
             return [str(item) for item in parsed if item]
         return [str(parsed)]
     return [str(value)]
+
+
+def _to_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(numeric):
+        return None
+    return numeric
+
+
+def _format_keyword_display(keyword: str) -> str:
+    keyword = (keyword or "").strip()
+    if not keyword:
+        return "(sin keyword)"
+    return " ".join(part for part in keyword.split() if part).title()
+
+
+def _format_percentage(value: float | None) -> str:
+    if value is None:
+        return "—"
+    return f"{value:+.1f}%"
+
+
+def _compute_percentile_value(series: pd.Series, percentile: float) -> float | None:
+    if series is None:
+        return None
+    numeric = pd.to_numeric(series, errors="coerce").dropna()
+    if numeric.empty:
+        return None
+    try:
+        value = float(np.nanpercentile(numeric, percentile))
+    except (TypeError, ValueError, IndexError):
+        return None
+    if math.isnan(value):
+        return None
+    return value
+
+
+def _coerce_flag(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, (int, float)):
+        return 1 if value > 0 else 0
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "si", "sí"}:
+        return 1
+    return 0
+
+
+def _prepare_pricing_batch(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    working = df.copy()
+    working["price"] = pd.to_numeric(working.get("price"), errors="coerce")
+    working = working[working["price"] > 0]
+
+    for flag_column in [
+        "shipping_full_flag",
+        "shipping_free_flag",
+        "official_store_flag",
+    ]:
+        if flag_column in working.columns:
+            working[flag_column] = working[flag_column].apply(_coerce_flag)
+        else:
+            working[flag_column] = 0
+
+    working["perceived_price"] = working["price"]
+    working["needs_shipping_adjustment"] = working["shipping_free_flag"].apply(
+        lambda value: 1 if value != 1 else 0
+    )
+    return working.reset_index(drop=True)
+
+
+def _load_latest_batch_for_source(
+    source_url: str, limit: int = 50
+) -> pd.DataFrame:
+    if not source_url:
+        return pd.DataFrame()
+
+    db_path = DATABASE_PATH
+    if not db_path.exists():
+        return pd.DataFrame()
+
+    try:
+        with sqlite3.connect(db_path) as conn:
+            latest_row = conn.execute(
+                "SELECT MAX(scrap_date) FROM mercadolivre_items WHERE _source = ?",
+                (source_url,),
+            ).fetchone()
+            if not latest_row or latest_row[0] is None:
+                return pd.DataFrame()
+
+            latest_scrap_date = latest_row[0]
+            query = """
+                SELECT
+                    mi.name,
+                    mi.seller,
+                    mi.price,
+                    mi.item_id,
+                    mi.product_url,
+                    mi._source,
+                    mi.scrap_date,
+                    COALESCE(pd.shipping_full_flag, 0) AS shipping_full_flag,
+                    COALESCE(pd.shipping_free_flag, 0) AS shipping_free_flag,
+                    COALESCE(pd.official_store_flag, 0) AS official_store_flag
+                FROM mercadolivre_items AS mi
+                LEFT JOIN product_details AS pd ON mi.item_id = pd.item_id
+                WHERE mi._source = ? AND mi.scrap_date = ?
+                ORDER BY mi.rowid
+                LIMIT ?
+            """
+
+            return pd.read_sql_query(
+                query,
+                conn,
+                params=(source_url, latest_scrap_date, limit),
+            )
+    except Exception:  # pylint: disable=broad-except
+        return pd.DataFrame()
+
+
+def _build_histogram(series: pd.Series, bins: int = 10) -> pd.DataFrame:
+    numeric = pd.to_numeric(series, errors="coerce").dropna()
+    if numeric.empty:
+        return pd.DataFrame()
+
+    unique_values = numeric.nunique()
+    if unique_values <= 1:
+        return pd.DataFrame(
+            {
+                "bin": [f"{_format_currency(numeric.iloc[0], 'ARS')}"],
+                "count": [int(numeric.size)],
+            }
+        )
+
+    adjusted_bins = max(3, min(bins, unique_values))
+    try:
+        buckets = pd.cut(numeric, bins=adjusted_bins)
+    except ValueError:
+        return pd.DataFrame()
+
+    hist = (
+        buckets.value_counts()
+        .sort_index()
+        .reset_index()
+        .rename(columns={"index": "bin", "count": "count"})
+    )
+    hist["bin"] = hist["bin"].astype(str)
+    return hist
+
+
 
 
 def _build_txt_payload(detail_row: Dict[str, Any], listing_row: Dict[str, Any]) -> str:
@@ -318,7 +479,7 @@ def _render_detail_preview(detail_row: Dict[str, Any], listing_row: Dict[str, An
 
 
 def _render_info_product_tab(tab_container, df: pd.DataFrame) -> None:
-    db_path = Path(__file__).resolve().parent.parent / "data" / "database.db"
+    db_path = DATABASE_PAT
 
     with tab_container:
         st.markdown("### Info product")
@@ -462,6 +623,346 @@ def _render_info_product_tab(tab_container, df: pd.DataFrame) -> None:
             mime="text/plain",
         )
 
+
+def _render_pricing_radar_tab(
+    tab_container, tables: Dict[str, pd.DataFrame]
+) -> None:
+    pricing_df = tables.get("pricing_kpis", pd.DataFrame()).copy()
+
+    with tab_container:
+        st.markdown("### 🧭 Pricing radar")
+        st.caption(
+            "Medí el termómetro de precios de tu keyword y definí un rango competitivo en segundos."
+        )
+
+        if pricing_df.empty:
+            st.info(
+                "Todavía no hay KPIs calculados. Ejecutá el scraping con transform para poblar la tabla pricing_kpis."
+            )
+            return
+
+        if "keyword_key" not in pricing_df.columns or "date" not in pricing_df.columns:
+            st.warning(
+                "La tabla pricing_kpis necesita las columnas keyword_key y date para mostrar esta vista."
+            )
+            return
+
+        working_df = pricing_df.copy()
+        working_df["date"] = pd.to_datetime(working_df["date"], errors="coerce")
+        working_df = working_df.dropna(subset=["date", "keyword_key"])
+        if working_df.empty:
+            st.info("No hay fechas válidas para mostrar.")
+            return
+
+        working_df["date"] = working_df["date"].dt.normalize()
+        working_df.sort_values(["keyword_key", "date"], inplace=True)
+
+        today = pd.Timestamp.today().normalize()
+        recent_cutoff = today - pd.Timedelta(days=14)
+        recent_df = working_df[working_df["date"] >= recent_cutoff]
+        candidate_df = recent_df if not recent_df.empty else working_df
+
+        keyword_options = sorted(
+            {
+                str(value).strip()
+                for value in candidate_df["keyword_key"]
+                if str(value).strip()
+            },
+            key=lambda text: text.lower(),
+        )
+
+        if not keyword_options:
+            st.info("No se encontraron keywords disponibles para los últimos días.")
+            return
+
+        selected_keyword = st.selectbox(
+            "Elegí la keyword a analizar",
+            keyword_options,
+            format_func=_format_keyword_display,
+            key="pricing_keyword_selector",
+        )
+
+        keyword_df = working_df[working_df["keyword_key"] == selected_keyword].copy()
+        if keyword_df.empty:
+            st.info("No hay registros históricos para esta keyword.")
+            return
+
+        keyword_df.sort_values("date", inplace=True)
+        latest_row = keyword_df.iloc[-1]
+        latest_date = pd.to_datetime(latest_row["date"], errors="coerce")
+        if pd.isna(latest_date):
+            st.info("La fecha del último registro no es válida.")
+            return
+        latest_date = latest_date.normalize()
+
+        source_url = str(latest_row.get("source_url") or "")
+        computed_at = latest_row.get("computed_at")
+
+        min_value = _to_float(latest_row.get("min"))
+        p25_value = _to_float(latest_row.get("p25"))
+        p40_value = _to_float(latest_row.get("p40"))
+        p50_value = _to_float(latest_row.get("p50"))
+        p60_value = _to_float(latest_row.get("p60"))
+        p75_value = _to_float(latest_row.get("p75"))
+        max_value = _to_float(latest_row.get("max"))
+        avg_value = _to_float(latest_row.get("avg"))
+        std_value = _to_float(latest_row.get("std"))
+        n_value = int(latest_row.get("n") or 0)
+
+        def _delta(days: int) -> float | None:
+            target_date = latest_date - pd.Timedelta(days=days)
+            matches = keyword_df[keyword_df["date"] == target_date]
+            if matches.empty:
+                return None
+            previous = _to_float(matches.iloc[-1].get("p50"))
+            if previous is None or previous == 0 or p50_value is None:
+                return None
+            return ((p50_value - previous) / previous) * 100
+
+        delta_yesterday_pct = _delta(1)
+        delta_week_pct = _delta(7)
+
+        batch_raw = _load_latest_batch_for_source(source_url)
+        prepared_batch = _prepare_pricing_batch(batch_raw)
+        p35_value = _compute_percentile_value(
+            prepared_batch.get("price"), 35
+        ) if not prepared_batch.empty else None
+        p45_value = _compute_percentile_value(
+            prepared_batch.get("price"), 45
+        ) if not prepared_batch.empty else None
+
+        def _currency_label(value: Any) -> str:
+            formatted = _format_currency(value, "ARS")
+            return formatted if formatted else "—"
+
+        source_caption = (
+            f"[{source_url}]({source_url})" if source_url else "—"
+        )
+        header_parts = [f"Fecha del lote: {latest_date.date().isoformat()}"]
+        header_parts.append(f"Fuente: {source_caption}")
+        if computed_at:
+            header_parts.append(f"Computado: {computed_at}")
+        st.caption(" · ".join(header_parts))
+
+        st.markdown("#### KPIs del día")
+        col_min, col_p25, col_p50, col_p75 = st.columns(4)
+        col_min.metric("Min", _currency_label(min_value))
+        col_p25.metric("P25", _currency_label(p25_value))
+        delta_display = (
+            f"{delta_yesterday_pct:+.1f}%" if delta_yesterday_pct is not None else None
+        )
+        col_p50.metric("P50", _currency_label(p50_value), delta=delta_display)
+        col_p50.caption(f"Δ vs. semana pasada: {_format_percentage(delta_week_pct)}")
+        col_p75.metric("P75", _currency_label(p75_value))
+
+        col_max, col_avg, col_std, col_n = st.columns(4)
+        col_max.metric("Max", _currency_label(max_value))
+        col_avg.metric("Promedio", _currency_label(avg_value))
+        col_std.metric("Desvío estándar", _currency_label(std_value))
+        col_n.metric("N", f"{n_value:,}".replace(",", "."))
+        st.caption(
+            f"P40: {_currency_label(p40_value)} · P60: {_currency_label(p60_value)}"
+        )
+
+        st.markdown("#### Simulador y regla sugerida")
+        advantage_cols = st.columns(3)
+        with advantage_cols[0]:
+            advantage_full = st.checkbox(
+                "Tengo FULL",
+                key=f"pricing_full_{selected_keyword}",
+            )
+        with advantage_cols[1]:
+            advantage_free = st.checkbox(
+                "Envío gratis real",
+                key=f"pricing_free_{selected_keyword}",
+            )
+        with advantage_cols[2]:
+            advantage_installments = st.checkbox(
+                "Ofrezco cuotas atractivas",
+                key=f"pricing_installments_{selected_keyword}",
+            )
+
+        traction_mode = st.checkbox(
+            "Necesito tracción inicial (7–10 días)",
+            key=f"pricing_traction_{selected_keyword}",
+        )
+
+        advantage = advantage_full or advantage_free or advantage_installments
+
+        range_low: float | None
+        range_high: float | None
+        range_label = ""
+
+        if traction_mode and p35_value is not None and p45_value is not None:
+            range_low, range_high, range_label = p35_value, p45_value, "P35–P45"
+        elif advantage and p50_value is not None and p60_value is not None:
+            range_low, range_high, range_label = p50_value, p60_value, "P50–P60"
+        elif p40_value is not None and p50_value is not None:
+            range_low, range_high, range_label = p40_value, p50_value, "P40–P50"
+        elif p50_value is not None:
+            range_low = range_high = p50_value
+            range_label = "P50"
+        else:
+            range_low = range_high = None
+
+        if range_low is not None:
+            effective_high = range_high if range_high is not None else range_low
+            center_value = (range_low + effective_high) / 2
+            if range_high is not None and range_low != range_high:
+                range_text = f"{_currency_label(range_low)} – {_currency_label(range_high)}"
+            else:
+                range_text = _currency_label(range_low)
+            st.success(
+                f"{range_label}: {range_text} · Centro sugerido: {_currency_label(center_value)}"
+            )
+        else:
+            st.warning("Necesitamos más datos limpios para sugerir un rango de precio.")
+
+        st.caption(
+            "Evitá perseguir el mínimo; apuntá a la mediana para relevancia y margen."
+        )
+
+        current_price = st.number_input(
+            "Ingresá tu precio actual (ARS)",
+            min_value=0.0,
+            step=100.0,
+            format="%.2f",
+            key=f"pricing_current_price_{selected_keyword}",
+        )
+        has_sales = st.checkbox(
+            "Esta publicación ya tiene ventas",
+            key=f"pricing_has_sales_{selected_keyword}",
+        )
+
+        st.markdown("#### Alertas operativas")
+        alerts: List[str] = []
+
+        if current_price > 0:
+            threshold = None
+            if avg_value is not None and std_value is not None:
+                threshold = avg_value + std_value
+            elif avg_value is not None:
+                threshold = avg_value
+
+            if threshold is not None and not advantage and current_price > threshold:
+                if p40_value is not None and p50_value is not None:
+                    alerts.append(
+                        "Tu precio actual está por encima del promedio + desvío. "
+                        f"Bajalo hacia {_currency_label(p40_value)} – {_currency_label(p50_value)} (P40–P50)."
+                    )
+
+            if (
+                has_sales
+                and p25_value is not None
+                and current_price < p25_value
+            ):
+                option_5 = _currency_label(current_price * 1.05)
+                option_8 = _currency_label(current_price * 1.08)
+                alerts.append(
+                    "Estás por debajo del P25. Probá subirlo a "
+                    f"{option_5} (+5%) o {option_8} (+8%)."
+                )
+
+        if (
+            delta_yesterday_pct is not None
+            and delta_yesterday_pct <= -10
+            and not advantage
+        ):
+            reference_price = current_price if current_price > 0 else p50_value
+            if reference_price is not None:
+                option_3 = _currency_label(reference_price * 0.97)
+                option_5 = _currency_label(reference_price * 0.95)
+                alerts.append(
+                    f"La mediana cayó {_format_percentage(delta_yesterday_pct)} vs. ayer. "
+                    f"Considerá ajustar por 72h a {option_3} (-3%) o {option_5} (-5%) si no tenés ventaja."
+                )
+
+        if alerts:
+            for message in alerts:
+                st.warning(message)
+        else:
+            st.info("No se detectaron alertas con los criterios actuales.")
+
+        st.markdown("#### Distribución del lote")
+        if prepared_batch.empty:
+            st.info("No hay datos del lote más reciente para graficar.")
+        else:
+            metric_choice = st.radio(
+                "Elegí la métrica de distribución",
+                options=["price", "perceived_price"],
+                format_func=lambda key: "Precio" if key == "price" else "Precio percibido",
+                key=f"pricing_metric_choice_{selected_keyword}",
+                horizontal=True,
+            )
+            hist_df = _build_histogram(prepared_batch[metric_choice])
+            if hist_df.empty:
+                st.info("No hay suficientes datos para construir el histograma.")
+            else:
+                chart = (
+                    alt.Chart(hist_df)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("bin:N", title="Rango (ARS)", sort=None),
+                        y=alt.Y("count:Q", title="Cantidad"),
+                        tooltip=["bin", "count"],
+                    )
+                )
+                st.altair_chart(chart, use_container_width=True)
+
+        st.markdown("#### Top 50 del lote más reciente")
+        if prepared_batch.empty:
+            st.info("No hay filas disponibles para esta keyword.")
+        else:
+            table_df = prepared_batch.copy()
+            table_df["price"] = pd.to_numeric(table_df["price"], errors="coerce")
+            table_df = table_df.dropna(subset=["price"])
+            table_df["Precio"] = table_df["price"].apply(
+                lambda value: _format_currency(value, "ARS") or "—"
+            )
+            table_df["FULL"] = table_df["shipping_full_flag"].apply(
+                lambda flag: "🟢 FULL" if flag else ""
+            )
+            table_df["ENVÍO GRATIS"] = table_df["shipping_free_flag"].apply(
+                lambda flag: "🟢 ENVÍO GRATIS" if flag else ""
+            )
+            table_df["OFICIAL"] = table_df["official_store_flag"].apply(
+                lambda flag: "🟦 OFICIAL" if flag else ""
+            )
+            table_df["Necesita ajuste envío"] = table_df[
+                "needs_shipping_adjustment"
+            ].apply(lambda value: "Sí" if value else "No")
+
+            display_columns = [
+                "name",
+                "seller",
+                "Precio",
+                "FULL",
+                "ENVÍO GRATIS",
+                "OFICIAL",
+                "Necesita ajuste envío",
+                "item_id",
+                "product_url",
+            ]
+
+            existing_columns = [
+                column for column in display_columns if column in table_df.columns
+            ]
+            renamed = table_df[existing_columns].rename(
+                columns={
+                    "name": "Producto",
+                    "seller": "Seller",
+                    "item_id": "Item ID",
+                    "product_url": "URL",
+                }
+            )
+            renamed = renamed.fillna("—")
+            st.dataframe(renamed, use_container_width=True, hide_index=True)
+
+        st.markdown("#### Qué es y por qué")
+        st.info(
+            "Inteligencia de precios = medir el mercado hoy (top 30–50 de tu keyword), "
+            "ubicarte cerca de la mediana, y ajustar según tus ventajas para maximizar ventas y margen."
+        )
 
 def get_df_from_db(db_path: str | Path) -> pd.DataFrame:
     """Load items from the SQLite database.
@@ -745,7 +1246,7 @@ def get_dashboard(
     st.title("Resultados del scraping de Mercado Libre Argentina")
     st.subheader("By Heitor Nolla")
 
-    tab_labels = ["Resultados"]
+    tab_labels = ["Resultados", "🧭 Pricing radar"]
     if tables:
         tab_labels.append("Tablas disponibles")
 
@@ -762,8 +1263,10 @@ def get_dashboard(
                 "No se detectaron tablas adicionales en la base de datos o no fue posible cargarlas."
             )
 
+    _render_pricing_radar_tab(tabs[1], tables)
+
     if tables:
-        with tabs[1]:
+        with tabs[2]:
             table_names = sorted(tables.keys())
             selected_table = st.selectbox(
                 "Seleccioná la tabla que querés explorar",
