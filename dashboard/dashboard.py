@@ -486,7 +486,43 @@ def get_df_from_db(db_path: str | Path) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def get_dashboard(df: pd.DataFrame) -> None:
+def load_all_tables(db_path: str | Path) -> Dict[str, pd.DataFrame]:
+    """Return all tables stored in the SQLite database as dataframes."""
+
+    db_path = Path(db_path)
+
+    if not db_path.exists():
+        return {}
+
+    tables: Dict[str, pd.DataFrame] = {}
+
+    try:
+        with sqlite3.connect(db_path) as conn:
+            try:
+                result = pd.read_sql_query(
+                    "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
+                    conn,
+                )
+                table_names = result["name"].tolist()
+            except Exception as exc:  # pylint: disable=broad-except
+                print(f"Error retrieving table list from {db_path}: {exc}")
+                table_names = []
+
+            for table_name in table_names:
+                try:
+                    tables[table_name] = pd.read_sql_query(
+                        f'SELECT * FROM "{table_name}"', conn
+                    )
+                except Exception as exc:  # pylint: disable=broad-except
+                    print(f"Error loading table {table_name} from {db_path}: {exc}")
+                    tables[table_name] = pd.DataFrame()
+    except Exception as exc:  # pylint: disable=broad-except
+        print(f"Error opening database {db_path}: {exc}")
+
+    return tables
+
+
+def get_dashboard(df: pd.DataFrame, tables: Dict[str, pd.DataFrame]) -> None:
     st.sidebar.title("Pestaña de navegación")
     st.sidebar.markdown("Selecciona la fecha de scraping que deseas explorar.")
 
