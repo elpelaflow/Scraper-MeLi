@@ -745,34 +745,40 @@ def get_dashboard(
     st.title("Resultados del scraping de Mercado Libre Argentina")
     st.subheader("By Heitor Nolla")
 
-    if df_to_show.empty:
-        st.warning("No hay datos para los criterios seleccionados.")
-    else:
-        st.dataframe(df_to_show, use_container_width=True)
+    tab_labels = ["Resultados"]
+    if tables:
+        tab_labels.append("Tablas disponibles")
 
-    st.divider()
+    tabs = st.tabs(tab_labels)
+
+    with tabs[0]:
+        if df_to_show.empty:
+            st.warning("No hay datos para los criterios seleccionados.")
+        else:
+            st.dataframe(df_to_show, use_container_width=True)
+
+        if not tables:
+            st.info(
+                "No se detectaron tablas adicionales en la base de datos o no fue posible cargarlas."
+            )
 
     if tables:
-        st.header("Tablas disponibles en la base de datos")
-        table_names = sorted(tables.keys())
-        selected_table = st.selectbox(
-            "Seleccioná la tabla que querés explorar",
-            options=table_names,
-            index=0,
-            key="table_selector",
-        )
-
-        selected_df = tables.get(selected_table, pd.DataFrame())
-        if selected_df.empty:
-            st.info(
-                "La tabla seleccionada no tiene registros para mostrar en este momento."
+        with tabs[1]:
+            table_names = sorted(tables.keys())
+            selected_table = st.selectbox(
+                "Seleccioná la tabla que querés explorar",
+                options=table_names,
+                index=0,
+                key="table_selector",
             )
-        else:
-            st.dataframe(selected_df, use_container_width=True)
-    else:
-        st.info(
-            "No se detectaron tablas adicionales en la base de datos o no fue posible cargarlas."
-        )
+
+            selected_df = tables.get(selected_table, pd.DataFrame())
+            if selected_df.empty:
+                st.info(
+                    "La tabla seleccionada no tiene registros para mostrar en este momento."
+                )
+            else:
+                st.dataframe(selected_df, use_container_width=True)
 
 
 def main() -> None:
