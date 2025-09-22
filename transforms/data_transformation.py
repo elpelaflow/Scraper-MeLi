@@ -13,6 +13,11 @@ import pandas as pd
 import numpy as np
 
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_DATA_PATH = BASE_DIR / "data" / "data.json"
+DEFAULT_DETAILS_PATH = BASE_DIR / "data" / "product_details.json"
+
+
 LISTING_OPTIONAL_COLUMNS = ("product_url", "item_id")
 DETAIL_COLUMNS = (
     "item_id",
@@ -515,14 +520,16 @@ def save_to_sqlite3(
 
 
 def transform_data(
-    path_to_data: str = "",
+    path_to_data: str | Path = "",
     search_url: str | None = None,
     details_path: str | Path | None = None,
 ):
     if path_to_data == "":
-        path_to_data = "../data/data.json"
+        data_path = DEFAULT_DATA_PATH
+    else:
+        data_path = Path(path_to_data).resolve()
 
-    df = read_data(path_to_data)
+    df = read_data(str(data_path))
     if df.empty:
         print("No se encontraron datos para procesar.")
         return
@@ -535,9 +542,12 @@ def transform_data(
 
     details_df = None
     if details_path is None:
-        candidate = Path(path_to_data).parent / "product_details.json"
+        if data_path == DEFAULT_DATA_PATH:
+            candidate = DEFAULT_DETAILS_PATH
+        else:
+            candidate = data_path.parent / "product_details.json"
     else:
-        candidate = Path(details_path)
+        candidate = Path(details_path).resolve()
 
     if candidate.exists():
         details_df = read_json_dataframe(candidate)
@@ -548,4 +558,4 @@ def transform_data(
 
 
 if __name__ == "__main__":
-    transform_data("../data/data.json")
+    transform_data(DEFAULT_DATA_PATH)
