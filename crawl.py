@@ -1,24 +1,38 @@
 import argparse
 import datetime
 import os
+from pathlib import Path
+from typing import Optional
 
+from config_utils import resolve_max_pages
 from extraction.spiders.mercadolivre import MercadoLivreSpider
 from transforms.data_transformation import transform_data
 
 
-def main(search_query: str):
+def main(search_query: str, max_pages: Optional[int] = None):
     # Check if data.json exists
-    data_path = os.path.abspath('data/data.json')
+    data_dir = Path('data')
+    data_dir.mkdir(parents=True, exist_ok=True)
 
-    if os.path.exists(data_path):
+    data_path = data_dir / 'data.json'
+    details_path = data_dir / 'product_details.json'
+
+    if data_path.exists():
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        new_name = f"data/data_{timestamp}.json"
-        os.rename(data_path, new_name)
-        print(f"Renamed existing data.json to data_{timestamp}.json")
+        new_name = data_dir / f"data_{timestamp}.json"
+        data_path.rename(new_name)
+        print(f"Renamed existing data.json to {new_name.name}")
 
-    MercadoLivreSpider.run_spider(search_query)
+    if details_path.exists():
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        new_name = data_dir / f"product_details_{timestamp}.json"
+        details_path.rename(new_name)
+        print(f"Renamed existing product_details.json to {new_name.name}")
+
+    resolved_max_pages = resolve_max_pages(cli_value=max_pages)
+    MercadoLivreSpider.run_spider(search_query, max_pages=resolved_max_pages)
     search_url = f"https://listado.mercadolibre.com.ar/{search_query.strip().lower().replace(' ', '-')}"
-    transform_data('data/data.json', search_url)
+    transform_data(str(data_path), search_url, details_path=str(details_path))
 
 
 if __name__ == "__main__":
@@ -29,6 +43,12 @@ if __name__ == "__main__":
         default="guitarra electrica",
         help="Search term to use when scraping Mercado Libre.",
     )
+    parser.add_argument(
+        "--max-pages",
+        type=int,
+        default=None,
+        help="Número máximo de páginas a recorrer (por defecto se usan valores de configuración).",
+    )
     args = parser.parse_args()
-    main(args.query)
-    
+    main(args.query, max_pages=args.max_pages)
+
