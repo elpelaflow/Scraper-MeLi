@@ -156,12 +156,11 @@ class MercadoLivreSpider(scrapy.Spider):
             yield listing_item
 
             if self._should_visit_detail(item_id, product_url):
-                headers = {"Referer": response.url}
                 yield response.follow(
                     product_url,
                     callback=self.parse_product_detail,
                     cb_kwargs={"item_id": item_id, "product_url": product_url},
-                    headers=headers,
+                    meta={"referer": response.url},
                 )
 
         if product_count == 0:
