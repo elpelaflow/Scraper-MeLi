@@ -12,11 +12,7 @@ BOT_NAME = "extraction"
 SPIDER_MODULES = ["extraction.spiders"]
 NEWSPIDER_MODULE = "extraction.spiders"
 
-USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/134.0.0.0 Safari/537.36"
-)
+USER_AGENT = ""
 
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
 #USER_AGENT = "coleta (+http://www.yourdomain.com)"
@@ -93,6 +89,7 @@ STATS_DUMP = True
 LOGSTATS_INTERVAL = 60
 
 DOWNLOADER_MIDDLEWARES = {
+    "scrapy.downloadermiddlewares.useragent.UserAgentMiddleware": None,
     "middlewares.rotate_headers.RandomHeadersMiddleware": 540,
 }
 
