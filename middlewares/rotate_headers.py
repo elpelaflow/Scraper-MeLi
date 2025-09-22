@@ -1,9 +1,6 @@
-+83
--19
+from __future__ import annotations
 
 """Downloader middleware responsible for rotating outbound request headers."""
-
-from __future__ import annotations
 
 import random
 from collections import deque
