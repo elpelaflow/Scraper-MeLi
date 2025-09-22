@@ -6,7 +6,7 @@ import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, List, Sequence, Tuple
 from urllib.parse import urlparse
 
 import pandas as pd
@@ -110,6 +110,104 @@ def _ensure_pricing_kpis_table(conn: sqlite3.Connection) -> None:
         ON pricing_kpis (date)
         """
     )
+
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    query = "SELECT name FROM sqlite_master WHERE type='table' AND name = ?"
+    row = conn.execute(query, (table_name,)).fetchone()
+    return row is not None
+
+
+def _get_table_columns(
+    conn: sqlite3.Connection, table_name: str
+) -> List[Tuple[str, str]]:
+    cursor = conn.execute(f"PRAGMA table_info(\"{table_name}\")")
+    columns: List[Tuple[str, str]] = []
+    for _, name, col_type, *_ in cursor.fetchall():
+        if name:
+            columns.append((name, col_type or ""))
+    return columns
+
+
+def _ensure_history_table(
+    conn: sqlite3.Connection,
+    history_table: str,
+    columns: Sequence[Tuple[str, str]],
+) -> None:
+    if not columns:
+        return
+
+    column_defs: List[str] = []
+    for name, col_type in columns:
+        definition = f'"{name}" {col_type}'.strip()
+        column_defs.append(definition)
+
+    column_defs.append('"snapshot_date" TEXT NOT NULL')
+    columns_sql = ", ".join(column_defs)
+
+    conn.execute(
+        f'CREATE TABLE IF NOT EXISTS "{history_table}" ({columns_sql})'
+    )
+    conn.execute(
+        f'CREATE INDEX IF NOT EXISTS idx_{history_table}_snapshot_date '
+        f'ON "{history_table}" ("snapshot_date")'
+    )
+
+
+def archive_previous_snapshot(
+    conn: sqlite3.Connection, snapshot_date: str | datetime | None
+) -> bool:
+    """Archive current listings and product details before loading a new run."""
+
+    if isinstance(snapshot_date, datetime):
+        snapshot_label = snapshot_date.isoformat()
+    elif snapshot_date:
+        snapshot_label = str(snapshot_date)
+    else:
+        snapshot_label = datetime.now().isoformat()
+
+    archived = False
+
+    def _archive_table(
+        source_table: str, history_table: str, columns: Sequence[Tuple[str, str]] | None = None
+    ) -> None:
+        nonlocal archived
+
+        if not _table_exists(conn, source_table):
+            return
+
+        if columns is None:
+            columns = _get_table_columns(conn, source_table)
+
+        if not columns:
+            return
+
+        count_row = conn.execute(
+            f'SELECT COUNT(1) FROM "{source_table}"'
+        ).fetchone()
+        if not count_row or not count_row[0]:
+            return
+
+        _ensure_history_table(conn, history_table, columns)
+
+        column_names = [name for name, _ in columns]
+        quoted_columns = ", ".join(f'"{name}"' for name in column_names)
+        insert_sql = (
+            f'INSERT INTO "{history_table}" ({quoted_columns}, "snapshot_date") '
+            f'SELECT {quoted_columns}, ? FROM "{source_table}"'
+        )
+        conn.execute(insert_sql, (snapshot_label,))
+        conn.execute(f'DELETE FROM "{source_table}"')
+        archived = True
+
+    _archive_table("mercadolivre_items", "mercadolivre_items_history")
+    _archive_table(
+        "product_details",
+        "product_details_history",
+        [(column, "") for column in DETAIL_COLUMNS],
+    )
+
+    return archived
 
 
 def _extract_keyword_key(source_url: str | None) -> str:
@@ -510,6 +608,14 @@ def save_to_sqlite3(
     database_path.parent.mkdir(parents=True, exist_ok=True)
 
     with sqlite3.connect(database_path) as conn:
+        snapshot_label: str | datetime | None = None
+        if "scrap_date" in df_listings.columns:
+            scrap_dates = df_listings["scrap_date"].dropna()
+            if not scrap_dates.empty:
+                snapshot_label = scrap_dates.iloc[0]
+
+        archive_previous_snapshot(conn, snapshot_label)
+
         df_listings.to_sql("mercadolivre_items", conn, if_exists="append", index=False)
         _ensure_listings_indexes(conn)
         if details_df is not None:

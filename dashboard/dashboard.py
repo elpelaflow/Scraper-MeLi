@@ -348,14 +348,71 @@ def _format_listing_record(record: Dict[str, Any]) -> str:
     return "".join(parts)
 
 
-def _load_details_table(db_path: Path) -> pd.DataFrame:
+def _load_details_table(
+    db_path: Path, table_name: str = "product_details", snapshot_date: str | None = None
+) -> pd.DataFrame:
     if not db_path.exists():
         return pd.DataFrame()
+
+    query = f'SELECT * FROM "{table_name}"'
+    params: tuple[Any, ...] = ()
+    if snapshot_date and table_name.endswith("_history"):
+        query += " WHERE snapshot_date = ?"
+        params = (snapshot_date,)
+
     try:
         with sqlite3.connect(db_path) as conn:
-            return pd.read_sql_query("SELECT * FROM product_details", conn)
+            return pd.read_sql_query(query, conn, params=params)
     except Exception:  # pylint: disable=broad-except
         return pd.DataFrame()
+
+
+def _load_listings_snapshot(
+    db_path: Path, table_name: str, snapshot_date: str
+) -> pd.DataFrame:
+    if not db_path.exists():
+        return pd.DataFrame()
+
+    query = f'SELECT * FROM "{table_name}" WHERE snapshot_date = ?'
+
+    try:
+        with sqlite3.connect(db_path) as conn:
+            return pd.read_sql_query(query, conn, params=(snapshot_date,))
+    except Exception:  # pylint: disable=broad-except
+        return pd.DataFrame()
+
+
+def _collect_available_snapshot_dates(
+    db_path: Path,
+) -> tuple[list[str], set[str], set[str]]:
+    if not db_path.exists():
+        return [], set(), set()
+
+    available_current: set[str] = set()
+    available_history: set[str] = set()
+
+    try:
+        with sqlite3.connect(db_path) as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT DISTINCT scrap_date FROM mercadolivre_items WHERE scrap_date IS NOT NULL"
+                ).fetchall()
+                available_current = {str(row[0]) for row in rows if row and row[0] is not None}
+            except sqlite3.OperationalError:
+                available_current = set()
+
+            try:
+                rows = conn.execute(
+                    "SELECT DISTINCT snapshot_date FROM mercadolivre_items_history WHERE snapshot_date IS NOT NULL"
+                ).fetchall()
+                available_history = {str(row[0]) for row in rows if row and row[0] is not None}
+            except sqlite3.OperationalError:
+                available_history = set()
+    except sqlite3.Error:
+        return [], set(), set()
+
+    merged = sorted(available_current | available_history, reverse=True)
+    return merged, available_current, available_history
 
 
 def _render_detail_preview(detail_row: Dict[str, Any], listing_row: Dict[str, Any]) -> None:
@@ -478,9 +535,13 @@ def _render_detail_preview(detail_row: Dict[str, Any], listing_row: Dict[str, An
             st.markdown(f"**Devoluciones:** {returns}")
 
 
-def _render_info_product_tab(tab_container, df: pd.DataFrame) -> None:
-    db_path = DATABASE_PATH
-
+def _render_info_product_tab(
+    tab_container,
+    df: pd.DataFrame,
+    db_path: Path,
+    details_table: str = "product_details",
+    snapshot_date: str | None = None,
+) -> None:
     with tab_container:
         st.markdown("### Info product")
         flag_enabled = load_bool_flag("ENABLE_PRODUCT_DETAILS", True)
@@ -575,10 +636,12 @@ def _render_info_product_tab(tab_container, df: pd.DataFrame) -> None:
             return
 
         @st.cache_data(show_spinner=False)
-        def _cached_details(path_str: str) -> pd.DataFrame:
-            return _load_details_table(Path(path_str))
+        def _cached_details(
+            path_str: str, table_name: str, snapshot: str | None
+        ) -> pd.DataFrame:
+            return _load_details_table(Path(path_str), table_name, snapshot)
 
-        details_df = _cached_details(str(db_path))
+        details_df = _cached_details(str(db_path), details_table, snapshot_date)
 
         detail_payload: Dict[str, Any] | None = None
         if not details_df.empty:
@@ -1024,11 +1087,65 @@ def load_all_tables(db_path: str | Path) -> Dict[str, pd.DataFrame]:
 
 
 def get_dashboard(
-    df: pd.DataFrame, tables: Dict[str, pd.DataFrame] | None = None
+    df: pd.DataFrame,
+    tables: Dict[str, pd.DataFrame] | None = None,
+    db_path: Path | str | None = None,
 ) -> None:
     tables = tables or {}
+    resolved_db_path = Path(db_path) if db_path is not None else DATABASE_PATH
+
     st.sidebar.title("Pestaña de navegación")
     st.sidebar.markdown("Selecciona la fecha de scraping que deseas explorar.")
+
+    available_dates, current_dates, history_dates = _collect_available_snapshot_dates(
+        resolved_db_path
+    )
+    select_options = ["Todas las fechas"] + available_dates
+    selected_date = st.sidebar.selectbox(
+        "Fecha de scraping",
+        options=select_options,
+        index=0,
+    )
+
+    details_table = "product_details"
+    details_snapshot: str | None = None
+
+    if selected_date == "Todas las fechas" or not selected_date:
+        active_df = df.copy() if not df.empty else df
+    elif selected_date in current_dates:
+        if "scrap_date" in df.columns:
+            try:
+                active_df = df[df["scrap_date"].astype(str) == selected_date]
+            except Exception:  # pylint: disable=broad-except
+                active_df = df[df["scrap_date"] == selected_date]
+        else:
+            try:
+                with sqlite3.connect(resolved_db_path) as conn:
+                    active_df = pd.read_sql_query(
+                        'SELECT * FROM "mercadolivre_items" WHERE scrap_date = ?',
+                        conn,
+                        params=(selected_date,),
+                    )
+            except Exception:  # pylint: disable=broad-except
+                active_df = pd.DataFrame()
+    elif selected_date in history_dates:
+        active_df = _load_listings_snapshot(
+            resolved_db_path, "mercadolivre_items_history", selected_date
+        )
+        details_table = "product_details_history"
+        details_snapshot = selected_date
+    else:
+        active_df = df
+
+    if (
+        selected_date
+        and selected_date != "Todas las fechas"
+        and active_df.empty
+        and selected_date in history_dates
+    ):
+        active_df = _load_listings_snapshot(
+            resolved_db_path, "mercadolivre_items_history", selected_date
+        )
 
     with st.sidebar.expander("🧰 Herramientas", expanded=True):
         # Si ya tenés tabs para Básicos/Avanzados, mantenelos y solo agrega la de Domain Discovery.
@@ -1040,7 +1157,13 @@ def get_dashboard(
             # Fallback si no existen otras tabs
             tab_info_product, tab_dd = st.tabs(["Info product", "Domain Discovery"])
 
-        _render_info_product_tab(tab_info_product, df)
+        _render_info_product_tab(
+            tab_info_product,
+            active_df,
+            resolved_db_path,
+            details_table=details_table,
+            snapshot_date=details_snapshot,
+        )
 
         with tab_dd:
             q = load_search_query()  # misma búsqueda que definiste en search_ui
@@ -1225,21 +1348,16 @@ def get_dashboard(
 
                         st.divider()
 
-    scrap_dates = df.get("scrap_date")
-    if scrap_dates is not None:
-        available_dates = scrap_dates.dropna().astype(str).unique().tolist()
-    else:
-        available_dates = []
+    df = active_df
 
-    available_dates.sort(reverse=True)
-    selected_date = st.sidebar.selectbox(
-        "Fecha de scraping",
-        options=["Todas las fechas"] + available_dates,
-        index=0,
-    )
-
-    if selected_date != "Todas las fechas":
-        df_to_show = df[df["scrap_date"].astype(str) == selected_date]
+    if selected_date != "Todas las fechas" and selected_date in current_dates:
+        if "scrap_date" in df.columns:
+            try:
+                df_to_show = df[df["scrap_date"].astype(str) == selected_date]
+            except Exception:  # pylint: disable=broad-except
+                df_to_show = df[df["scrap_date"] == selected_date]
+        else:
+            df_to_show = df
     else:
         df_to_show = df
 
@@ -1291,11 +1409,13 @@ def main() -> None:
     df = get_df_from_db(data_dir)
     tables = load_all_tables(data_dir)
 
-    if df.empty:
+    history_df = tables.get("mercadolivre_items_history", pd.DataFrame())
+    if df.empty and history_df.empty:
         st.sidebar.warning("No se encontró información en la base de datos.")
 
-    get_dashboard(df, tables)
+    get_dashboard(df, tables, data_dir)
 
 
 if __name__ == "__main__":
     main()
+    

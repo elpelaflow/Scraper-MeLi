@@ -56,6 +56,18 @@ Actualmente, el dashboard se ve así:
 
 Puedes buscar todos los artículos y aplicar filtros.
 
+### Esquema de base de datos y snapshots
+
+Cada corrida de `transform` sobreescribe las tablas principales (`mercadolivre_items` y `product_details`) para que el dashboard muestre siempre el lote más reciente. Antes de insertar la nueva corrida se realiza un _snapshot_ automático: los datos vigentes se copian en tablas espejo llamadas `mercadolivre_items_history` y `product_details_history`, agregando una columna `snapshot_date` con la fecha de referencia de la captura.
+
+Podés consultar corridas anteriores desde el dashboard seleccionando la fecha deseada. Si necesitás conservar los datos previos a esta migración, ejecutá una copia única del script de respaldo:
+
+```bash
+python transforms/migrate_history.py
+```
+
+El script detecta la fecha (`scrap_date`) más reciente disponible y la reutiliza como `snapshot_date`. También acepta un valor personalizado con el flag `--snapshot-date`.
+
 ## Cómo instalar y ejecutar el proyecto
 
 ### Con Docker
